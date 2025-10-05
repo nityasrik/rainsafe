@@ -1,0 +1,11 @@
+# requirements.txt
+fastapi
+uvicorn
+motor
+python-dotenv
+pymongo[srv]
+pandas
+scikit-learn
+certifi
+dnspython
+requests

@@ -1,0 +1,9 @@
+# Ignore the local Python virtual environment
+venv/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore environment file to prevent baking secrets into the image
+.env
