@@ -8,4 +8,20 @@ services:
     # Add this line to load the .env file
     env_file:
       - .env
+    environment:
+      # Fallback if .env is missing or incomplete
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/rainsafe_db}
+    depends_on:
+      - mongo
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  mongo:
+    image: mongo:6
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
