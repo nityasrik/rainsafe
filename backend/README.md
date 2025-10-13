@@ -15,7 +15,8 @@ A Flask/FastAPI backend for flood risk assessment and real-time weather monitori
 ### Core Endpoints
 - `GET /` - Health check
 - `POST /report` - Submit flood reports
-- `GET /risk?lat={lat}&lon={lon}` - Get flood risk assessment
+- `GET /risk?lat={lat}&lon={lon}` - Get flood risk assessment (includes `details.recommendations`)
+- `GET /recommendations?lat={lat}&lon={lon}` - Get actionable recommendations based on current risk
 - `GET /dashboard-data` - Get dashboard data for frontend
 - `POST /alerts` - Send flood alerts
 

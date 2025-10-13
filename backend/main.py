@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+from app.models.flood_predictor import FloodPredictor
+
 # from app.models.flood_predictor import FloodPredictor
 
 # Load environment variables
@@ -58,13 +60,12 @@ async def lifespan(app: FastAPI):
         print(f"❌ Failed to connect to MongoDB: {e}")
         raise RuntimeError("Database connection failed")
     
-    # Initialize ML predictor
+    # Initialize ML predictor (with heuristic fallback if artifacts missing)
     try:
-        # predictor = FloodPredictor()
-        app.state.predictor = None
-        print("⚠️ ML predictor disabled for now")
+        app.state.predictor = FloodPredictor()
+        print("✅ ML predictor ready (artifacts optional, heuristic enabled)")
     except Exception as e:
-        print(f"⚠️ ML predictor initialization failed: {e}")
+        print(f"⚠️ ML predictor initialization failed, continuing without predictor: {e}")
         app.state.predictor = None
     
     print("✅ RainSafe API startup complete!")
@@ -187,6 +188,38 @@ async def gather_features_for_prediction(request: Request, lat: float, lon: floa
         return [25, 50, 0, 1013, 0]
 
 
+def generate_recommendations(risk_level: str, details: dict) -> List[str]:
+    """Generate actionable recommendations based on assessed risk.
+
+    Returns a concise, prioritized list of actions appropriate for the user.
+    """
+    risk = (risk_level or "").capitalize()
+    actions: List[str] = []
+
+    if risk == "High":
+        actions = [
+            "Avoid travel through flooded areas; seek higher ground immediately",
+            "Move valuables and electronics above floor level",
+            "Turn off main power if water is entering your premises",
+            "Follow local authority alerts and prepare to evacuate",
+        ]
+    elif risk == "Medium":
+        actions = [
+            "Delay non-essential travel and monitor conditions",
+            "Prepare an emergency kit (water, food, flashlight, power bank)",
+            "Park vehicles on higher ground",
+            "Track official weather and civic advisories",
+        ]
+    else:  # Low or Unknown
+        actions = [
+            "Stay informed; conditions may change quickly",
+            "Check neighborhood drains and keep them unblocked",
+            "Report any unusual water accumulation via the app",
+        ]
+
+    return actions
+
+
 # --- API Endpoints ---
 @app.get("/")
 def read_root():
@@ -226,9 +259,9 @@ async def get_risk(request: Request, lat: float, lon: float):
         threshold_result = await check_thresholds(request, lat, lon)
         features = await gather_features_for_prediction(request, lat, lon)
         
-        # Get ML prediction
-        ml_risk = "Low"  # Default
-        if request.app.state.predictor:
+        # Get ML prediction (or heuristic fallback)
+        ml_risk = "Low"
+        if request.app.state.predictor is not None:
             ml_risk = request.app.state.predictor.predict(features)
 
         # Hybrid risk decision
@@ -239,6 +272,8 @@ async def get_risk(request: Request, lat: float, lon: float):
         else:
             final_risk = ml_risk
 
+        recommendations = generate_recommendations(final_risk, threshold_result["details"])
+
         return {
             "risk_level": final_risk,
             "source": "hybrid-historical",
@@ -246,6 +281,7 @@ async def get_risk(request: Request, lat: float, lon: float):
                 "threshold_assessment": threshold_result["risk"],
                 "ml_assessment": ml_risk,
                 "threshold_details": threshold_result["details"],
+                "recommendations": recommendations,
             },
         }
     except Exception as e:
@@ -257,6 +293,33 @@ async def get_risk(request: Request, lat: float, lon: float):
             "source": "error",
             "details": {"error": str(e)}
         }
+
+
+@app.get("/recommendations")
+async def get_recommendations(request: Request, lat: float, lon: float):
+    """Return recommended actions for a location based on current risk."""
+    try:
+        threshold_result = await check_thresholds(request, lat, lon)
+        features = await gather_features_for_prediction(request, lat, lon)
+
+        ml_risk = "Low"
+        if request.app.state.predictor is not None:
+            ml_risk = request.app.state.predictor.predict(features)
+
+        if "High" in [threshold_result["risk"], ml_risk]:
+            final_risk = "High"
+        elif "Medium" in [threshold_result["risk"]]:
+            final_risk = "Medium"
+        else:
+            final_risk = ml_risk
+
+        actions = generate_recommendations(final_risk, threshold_result["details"])
+        return {"risk_level": final_risk, "recommendations": actions}
+    except Exception as e:
+        import traceback
+        print("❌ Error in /recommendations:", str(e))
+        traceback.print_exc()
+        return {"risk_level": "Unknown", "recommendations": [], "error": str(e)}
 
 
 @app.get("/dashboard-data")
