@@ -14,13 +14,12 @@ from dotenv import load_dotenv
 
 # --- Import our services and schemas ---
 from app.services.risk_service import RiskAssessmentService
-# Import all necessary models
 from app.models.schemas import (
     ReportCreate, ReportResponse, RiskResponse, Alert, DashboardResponse,
     Report, MapPoint, RiskLevel, AssessmentSource,
     RiskAssessmentDetails, WaterLevel
 )
-from app.models.flood_predictor import FloodPredictor 
+from app.models.flood_predictor import FloodPredictor
 from config.settings import RISK_THRESHOLDS
 from app.utils.database import db
 
@@ -40,19 +39,19 @@ def get_risk_service() -> RiskAssessmentService:
 async def lifespan(app: FastAPI):
     """Manage application lifespan for startup and shutdown events."""
     print("🚀 Starting RainSafe API...")
-    
+
     if not await db.connect():
         raise RuntimeError("Failed to connect to MongoDB during startup.")
-    
+
     try:
-        app.state.predictor = FloodPredictor() 
+        app.state.predictor = FloodPredictor()  # <-- Enable the real ML model here!
         print("✅ Flood predictor (ML) model loaded successfully.")
     except Exception as e:
         print(f"⚠️ ML predictor initialization failed: {e}. Running without ML predictions.")
         app.state.predictor = None
-    
+
     yield
-    
+
     print("🛑 Shutting down RainSafe API...")
     await db.disconnect()
 
@@ -87,19 +86,19 @@ async def create_report(
     try:
         report_data = report.model_dump()
         report_data["created_at"] = datetime.now(timezone.utc)
-        
+
         nlp_analysis = await risk_service.analyze_description_with_nlp(report.description)
         report_data["nlp_analysis"] = nlp_analysis
-        
+
         reports_collection = db.get_collection("reports")
-        new_report_result = await reports_collection.insert_one(report_data) 
-        
+        new_report_result = await reports_collection.insert_one(report_data)
+
         created_report_doc = await reports_collection.find_one({"_id": new_report_result.inserted_id})
         if not created_report_doc:
             raise HTTPException(status_code=500, detail="Failed to retrieve newly created report.")
-        
+
         created_report_doc["_id"] = str(created_report_doc["_id"])
-        
+
         return ReportResponse(message="Report received and analyzed successfully!", data=Report(**created_report_doc))
 
     except Exception as e:
@@ -107,26 +106,28 @@ async def create_report(
 
 @app.get("/risk", response_model=RiskResponse)
 async def get_risk(
-    lat: float, 
-    lon: float, 
+    lat: float,
+    lon: float,
     request: Request,
     risk_service: RiskAssessmentService = Depends(get_risk_service)
 ):
     """Get a user-friendly, hybrid flood risk assessment for a location."""
     try:
         threshold_result = await risk_service.check_thresholds(lat, lon)
-        ml_features_data = await risk_service.gather_features_for_prediction(lat, lon) 
-        
-        ml_risk_level = RiskLevel.UNKNOWN
-        if request.app.state.predictor: # This check now matters!
-            ml_prediction_raw = request.app.state.predictor.predict([ml_features_data["features"]])[0]
-            try:
-                ml_risk_level = RiskLevel(ml_prediction_raw)
-            except ValueError:
-                print(f"Warning: ML predictor returned unknown risk level: {ml_prediction_raw}")
-        else: # Add a log if predictor is supposed to be on but isn't
-            print("INFO: ML predictor is disabled or failed to load. ml_assessment will be 'Unknown'.")
+        ml_features_data = await risk_service.gather_features_for_prediction(lat, lon)
 
+        ml_risk_level = RiskLevel.UNKNOWN
+        # --- ML integration: Convert predictor output string to enum (LOW/HIGH/UNKNOWN) ---
+        if request.app.state.predictor:
+            raw_prediction = request.app.state.predictor.predict([ml_features_data["features"]])[0]
+            if raw_prediction == "High":
+                ml_risk_level = RiskLevel.HIGH
+            elif raw_prediction == "Low":
+                ml_risk_level = RiskLevel.LOW
+            else:
+                ml_risk_level = RiskLevel.UNKNOWN
+        else:
+            print("INFO: ML predictor is disabled or failed to load. ml_assessment will be 'Unknown'.")
 
         final_risk = RiskLevel.LOW
         if threshold_result["risk"] == RiskLevel.HIGH.value or ml_risk_level == RiskLevel.HIGH:
@@ -142,16 +143,16 @@ async def get_risk(
             RiskLevel.HIGH: "High flood risk detected. Avoid travel in this area.",
             RiskLevel.UNKNOWN: "Could not determine risk. Please check conditions manually."
         }
-        
+
         contributing_factors = []
         if "trigger" in threshold_result["details"]:
             contributing_factors.append(threshold_result["details"]["trigger"])
-        
+
         if request.app.state.predictor and ml_risk_level != RiskLevel.UNKNOWN:
-             contributing_factors.append(f"ML assessment: {ml_risk_level.value}")
+            contributing_factors.append(f"ML assessment: {ml_risk_level.value}")
         elif ml_features_data["weather_data_found"] and not request.app.state.predictor:
-             contributing_factors.append("Recent weather data available (ML model disabled)")
-        
+            contributing_factors.append("Recent weather data available (ML model disabled)")
+
         if not contributing_factors:
             contributing_factors.append("No specific factors identified.")
 
@@ -183,7 +184,6 @@ async def get_risk(
             )
         )
 
-
 @app.get("/dashboard-data", response_model=DashboardResponse)
 async def get_dashboard_data(
     risk_service: RiskAssessmentService = Depends(get_risk_service),
@@ -193,7 +193,7 @@ async def get_dashboard_data(
     """Get dashboard data for frontend."""
     try:
         reports_collection = db.get_collection("reports")
-        
+
         query = {}
         if not start_time and not end_time:
             start_time = datetime.now(timezone.utc) - timedelta(hours=48)
@@ -201,8 +201,7 @@ async def get_dashboard_data(
         elif not end_time:
             end_time = datetime.now(timezone.utc)
         elif not start_time:
-             start_time = end_time - timedelta(hours=48)
-
+            start_time = end_time - timedelta(hours=48)
 
         if start_time:
             query["created_at"] = {"$gte": start_time}
@@ -217,7 +216,7 @@ async def get_dashboard_data(
         map_points: List[MapPoint] = []
         for report_doc in recent_reports_docs:
             report_id = str(report_doc.get("_id"))
-            
+
             water_level_str = report_doc.get("water_level")
             report_risk_level = RiskLevel.LOW
             if water_level_str:
@@ -229,7 +228,6 @@ async def get_dashboard_data(
                         report_risk_level = RiskLevel.MEDIUM
                 except ValueError:
                     print(f"Warning: Unknown water_level '{water_level_str}' in report {report_id}")
-
 
             map_points.append(
                 MapPoint(
@@ -247,20 +245,20 @@ async def get_dashboard_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve dashboard data: {str(e)}")
 
-@app.post("/alerts", response_model=Alert, status_code=200) 
+@app.post("/alerts", response_model=Alert, status_code=200)
 async def send_alert(
     alert_data: Alert,
-    risk_service: RiskAssessmentService = Depends(get_risk_service) 
+    risk_service: RiskAssessmentService = Depends(get_risk_service)
 ):
     """Send a flood alert and log it."""
     try:
         alert_record = alert_data.model_dump()
         alert_record["sent_at"] = datetime.now(timezone.utc)
-        
+
         alerts_collection = db.get_collection("alerts")
         result = await alerts_collection.insert_one(alert_record)
-        
-        alert_record["_id"] = str(result.inserted_id) 
+
+        alert_record["_id"] = str(result.inserted_id)
 
         return Alert(**alert_record)
 

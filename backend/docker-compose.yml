@@ -1,40 +1,75 @@
-version: "3.9"
+# backend/docker-compose.yml
 
 services:
+  mongodb:
+    image: mongo:latest
+    container_name: rainsafe-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017" # Expose for local testing/tools if needed
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rainsafe-network
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rainsafe-backend
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
+    restart: unless-stopped
     env_file:
       - .env
-    depends_on:
-      - mongo
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    environment:
-      - MONGO_URL=mongodb://mongo:27017/rainsafe_db
-    restart: unless-stopped
-
-  mongo:
-    image: mongo:6
-    container_name: rainsafe-mongo
     ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    environment:
-      - MONGO_INITDB_DATABASE=rainsafe_db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - rainsafe-network
+
+  # --- NEW N8N SERVICE ---
+  n8n:
+    image: n8n/n8n # Use the official n8n image
+    container_name: rainsafe-n8n
     restart: unless-stopped
+    ports:
+      - "5678:5678" # Default n8n UI port
+    volumes:
+      - n8n_data:/home/node/.n8n # Persist n8n's internal data
+    environment:
+      # These are important for n8n's internal database and configuration
+      - N8N_HOST=${N8N_HOST:-localhost} # Host n8n is running on, used for self-referencing URLs
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://${N8N_HOST:-localhost}:5678/
+      - N8N_BASIC_AUTH_ACTIVE=true # Enable basic auth for security
+      - N8N_BASIC_AUTH_USER=n8nuser
+      - N8N_BASIC_AUTH_PASSWORD=n8npassword # CHANGE THIS IN PRODUCTION
+      # Optional: To use MongoDB for n8n's internal database instead of SQLite
+      # - DB_TYPE=mongodb
+      # - DB_MONGO_CONNECTION_URL=mongodb://mongodb:27017/n8n_db # Connect to your MongoDB service
+      #   Note: This makes n8n use MongoDB for its own data. For simple setups, SQLite (default) is fine.
+    # Optional: If n8n needs to access your backend's .env variables (e.g., API keys for external services)
+    # env_file:
+    #   - .env
+    networks:
+      - rainsafe-network
+    depends_on:
+      mongodb: # n8n depends on mongodb if it uses it for its internal DB or workflows
+        condition: service_healthy
+      backend: # n8n depends on backend if it makes API calls to it
+        condition: service_started # or service_healthy if you have a healthcheck
+
+networks:
+  rainsafe-network:
+    driver: bridge
 
 volumes:
-  mongo-data:
+  mongo_data:
+  n8n_data: # Define volume for n8n's data
