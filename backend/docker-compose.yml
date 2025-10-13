@@ -36,5 +36,27 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  n8n:
+    image: n8nio/n8n:1.72.1
+    container_name: rainsafe-n8n
+    ports:
+      - "5678:5678"
+    env_file:
+      - .env
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+      - TZ=UTC
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      - backend
+      - mongo
+    restart: unless-stopped
+
 volumes:
   mongo-data:
+  n8n-data:
