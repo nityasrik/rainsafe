@@ -1,27 +1,40 @@
+version: "3.9"
+
 services:
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rainsafe-backend
     ports:
       - "8000:8000"
     volumes:
       - .:/app
-    # Add this line to load the .env file
     env_file:
       - .env
-    environment:
-      # Fallback if .env is missing or incomplete
-      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/rainsafe_db}
     depends_on:
       - mongo
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - MONGO_URL=mongodb://mongo:27017/rainsafe_db
+    restart: unless-stopped
 
   mongo:
     image: mongo:6
-    restart: unless-stopped
+    container_name: rainsafe-mongo
     ports:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=rainsafe_db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
 volumes:
   mongo-data:

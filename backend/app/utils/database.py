@@ -4,6 +4,7 @@ Database connection and utilities
 
 import os
 import motor.motor_asyncio
+# Assuming config.settings has MONGO_URI and DATABASE_NAME
 from config.settings import MONGO_URI, DATABASE_NAME
 
 
@@ -27,20 +28,23 @@ class Database:
             
         except Exception as e:
             print(f"❌ Failed to connect to MongoDB: {e}")
+            self.client = None # Ensure client is reset on failure
+            self.database = None # Ensure database is reset on failure
             return False
     
     async def disconnect(self):
         """Disconnect from MongoDB"""
-        if self.client:
+        if self.client: # This is fine as client is an actual object that can be checked
             self.client.close()
+            self.client = None
+            self.database = None
             print("🔒 MongoDB connection closed")
     
     def get_collection(self, collection_name: str):
         """Get a collection from the database"""
-        if not self.database:
+        if self.database is None: # <--- CHANGED THIS LINE
             raise RuntimeError("Database not connected")
         return self.database[collection_name]
-
 
 # Global database instance
 db = Database()

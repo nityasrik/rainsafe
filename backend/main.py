@@ -1,332 +1,268 @@
 """
-RainSafe Backend - Working Version
+RainSafe Backend - Main Application (with Dependency Injection)
 """
 
 import os
-import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import motor.motor_asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# from app.models.flood_predictor import FloodPredictor
+# --- Import our services and schemas ---
+from app.services.risk_service import RiskAssessmentService
+# Import all necessary models
+from app.models.schemas import (
+    ReportCreate, ReportResponse, RiskResponse, Alert, DashboardResponse,
+    Report, MapPoint, RiskLevel, AssessmentSource,
+    RiskAssessmentDetails, WaterLevel
+)
+from app.models.flood_predictor import FloodPredictor 
+from config.settings import RISK_THRESHOLDS
+from app.utils.database import db
 
 # Load environment variables
 load_dotenv()
 
-# --- Data Models ---
-class Report(BaseModel):
-    latitude: float
-    longitude: float
-    description: str
-    water_level: Optional[str] = None
-
-
-class Alert(BaseModel):
-    location_name: str
-    risk_level: str
-    recipient: str
-
-
-class RiskResponse(BaseModel):
-    risk_level: str
-    source: str
-    details: dict
-
+# --- Dependency Injection Setup ---
+def get_risk_service() -> RiskAssessmentService:
+    """
+    Dependency provider for the RiskAssessmentService.
+    FastAPI will call this function for endpoints that need the service.
+    """
+    return RiskAssessmentService(database=db)
 
 # --- Lifespan function for startup and shutdown ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan"""
-    # Startup
+    """Manage application lifespan for startup and shutdown events."""
     print("🚀 Starting RainSafe API...")
     
-    # Connect to MongoDB
-    try:
-        app.state.mongodb_client = motor.motor_asyncio.AsyncIOMotorClient(os.getenv("MONGO_URI"))
-        app.state.mongodb = app.state.mongodb_client.rainsafe_db
-        
-        # Test connection
-        await app.state.mongodb_client.admin.command('ping')
-        print("✅ Successfully connected to MongoDB")
-    except Exception as e:
-        print(f"❌ Failed to connect to MongoDB: {e}")
-        raise RuntimeError("Database connection failed")
+    if not await db.connect():
+        raise RuntimeError("Failed to connect to MongoDB during startup.")
     
-    # Initialize ML predictor
     try:
-        # predictor = FloodPredictor()
-        app.state.predictor = None
-        print("⚠️ ML predictor disabled for now")
+        app.state.predictor = FloodPredictor() 
+        print("✅ Flood predictor (ML) model loaded successfully.")
     except Exception as e:
-        print(f"⚠️ ML predictor initialization failed: {e}")
+        print(f"⚠️ ML predictor initialization failed: {e}. Running without ML predictions.")
         app.state.predictor = None
-    
-    print("✅ RainSafe API startup complete!")
     
     yield
     
-    # Shutdown
     print("🛑 Shutting down RainSafe API...")
-    app.state.mongodb_client.close()
-    print("🔒 RainSafe API shutdown complete")
+    await db.disconnect()
 
-
-# Initialize FastAPI with lifespan manager
+# Initialize FastAPI with the lifespan manager
 app = FastAPI(
     title="RainSafe API",
-    version="1.0.0",
-    description="Flood risk assessment and weather monitoring API",
+    version="1.2.0",
+    description="A scalable and testable API for flood risk assessment.",
     lifespan=lifespan
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# --- Helper Functions ---
-async def check_thresholds(request: Request, lat: float, lon: float):
-    """Check if location meets risk thresholds based on user reports and weather"""
-    try:
-        reports_collection = request.app.state.mongodb.reports
-        
-        # Find recent reports near the location (within ~1km radius)
-        nearby_reports = await reports_collection.find({
-            "latitude": {"$gte": lat - 0.01, "$lte": lat + 0.01},
-            "longitude": {"$gte": lon - 0.01, "$lte": lon + 0.01}
-        }).to_list(length=10)
-        
-        user_reports_found = len(nearby_reports)
-        
-        # Check for high water level reports
-        high_risk_reports = [
-            report for report in nearby_reports 
-            if report.get("water_level") in ["Knee-deep", "Waist-deep", "Chest-deep", "Above head"]
-        ]
-        
-        # Determine risk level
-        if high_risk_reports:
-            risk_level = "High"
-            trigger = "High water level reported"
-        elif user_reports_found > 0:
-            risk_level = "Medium"
-            trigger = "Recent reports found"
-        else:
-            risk_level = "Low"
-            trigger = "No recent reports"
-        
-        # Check weather data availability
-        weather_collection = request.app.state.mongodb.weather_data
-        recent_weather = await weather_collection.find_one({
-            "fetched_at": {"$gte": "2025-10-01"}
-        })
-        weather_data_found = recent_weather is not None
-        
-        return {
-            "risk": risk_level,
-            "details": {
-                "user_reports_found": user_reports_found,
-                "weather_data_found": weather_data_found,
-                "trigger": trigger
-            }
-        }
-        
-    except Exception as e:
-        print(f"Error in threshold check: {e}")
-        return {
-            "risk": "Unknown",
-            "details": {"error": str(e)}
-        }
-
-
-async def gather_features_for_prediction(request: Request, lat: float, lon: float):
-    """Gather features for ML prediction"""
-    try:
-        # Get recent reports count
-        reports_collection = request.app.state.mongodb.reports
-        recent_reports_count = await reports_collection.count_documents({
-            "latitude": {"$gte": lat - 0.01, "$lte": lat + 0.01},
-            "longitude": {"$gte": lon - 0.01, "$lte": lon + 0.01}
-        })
-        
-        # Get weather data (simplified features)
-        weather_collection = request.app.state.mongodb.weather_data
-        recent_weather = await weather_collection.find_one({
-            "fetched_at": {"$gte": "2025-10-01"}
-        })
-        
-        if recent_weather:
-            current_weather = recent_weather.get("current_weather", {})
-            features = [
-                current_weather.get("temp", 25),
-                current_weather.get("humidity", 50),
-                current_weather.get("rain_1h_mm", 0),
-                current_weather.get("pressure", 1013),
-                recent_reports_count
-            ]
-        else:
-            # Default features if no weather data
-            features = [25, 50, 0, 1013, recent_reports_count]
-        
-        return features
-        
-    except Exception as e:
-        print(f"Error gathering features: {e}")
-        # Return default features
-        return [25, 50, 0, 1013, 0]
-
-
-# --- API Endpoints ---
+# --- API Endpoints (Now using Dependency Injection) ---
 @app.get("/")
 def read_root():
-    """Health check endpoint"""
+    """Health check endpoint."""
     return {"status": "RainSafe API is running!"}
 
-
-@app.post("/report", status_code=201)
-async def create_report(request: Request, report: Report):
-    """Submit a flood report"""
+@app.post("/report", response_model=ReportResponse, status_code=201)
+async def create_report(
+    report: ReportCreate,
+    risk_service: RiskAssessmentService = Depends(get_risk_service)
+):
+    """Submit a new flood report with non-blocking NLP analysis."""
     try:
         report_data = report.model_dump()
         report_data["created_at"] = datetime.now(timezone.utc)
-
-        reports_collection = request.app.state.mongodb.reports
-        new_report = await reports_collection.insert_one(report_data)
-        print(f"✅ Inserted report with ID: {new_report.inserted_id}")
-
-        created_report = await reports_collection.find_one({"_id": new_report.inserted_id})
-        if not created_report:
-            raise ValueError("Report was inserted but not found!")
-
-        created_report["_id"] = str(created_report["_id"])
-        return {"message": "Report received successfully!", "data": created_report}
+        
+        nlp_analysis = await risk_service.analyze_description_with_nlp(report.description)
+        report_data["nlp_analysis"] = nlp_analysis
+        
+        reports_collection = db.get_collection("reports")
+        new_report_result = await reports_collection.insert_one(report_data) 
+        
+        created_report_doc = await reports_collection.find_one({"_id": new_report_result.inserted_id})
+        if not created_report_doc:
+            raise HTTPException(status_code=500, detail="Failed to retrieve newly created report.")
+        
+        created_report_doc["_id"] = str(created_report_doc["_id"])
+        
+        return ReportResponse(message="Report received and analyzed successfully!", data=Report(**created_report_doc))
 
     except Exception as e:
-        import traceback
-        print("❌ Error in /report:", str(e))
-        traceback.print_exc()
-        return {"error": str(e)}
-
+        raise HTTPException(status_code=500, detail=f"Error creating report: {str(e)}")
 
 @app.get("/risk", response_model=RiskResponse)
-async def get_risk(request: Request, lat: float, lon: float):
-    """Get flood risk assessment for a location"""
+async def get_risk(
+    lat: float, 
+    lon: float, 
+    request: Request,
+    risk_service: RiskAssessmentService = Depends(get_risk_service)
+):
+    """Get a user-friendly, hybrid flood risk assessment for a location."""
     try:
-        threshold_result = await check_thresholds(request, lat, lon)
-        features = await gather_features_for_prediction(request, lat, lon)
+        threshold_result = await risk_service.check_thresholds(lat, lon)
+        ml_features_data = await risk_service.gather_features_for_prediction(lat, lon) 
         
-        # Get ML prediction
-        ml_risk = "Low"  # Default
-        if request.app.state.predictor:
-            ml_risk = request.app.state.predictor.predict(features)
+        ml_risk_level = RiskLevel.UNKNOWN
+        if request.app.state.predictor: # This check now matters!
+            ml_prediction_raw = request.app.state.predictor.predict([ml_features_data["features"]])[0]
+            try:
+                ml_risk_level = RiskLevel(ml_prediction_raw)
+            except ValueError:
+                print(f"Warning: ML predictor returned unknown risk level: {ml_prediction_raw}")
+        else: # Add a log if predictor is supposed to be on but isn't
+            print("INFO: ML predictor is disabled or failed to load. ml_assessment will be 'Unknown'.")
 
-        # Hybrid risk decision
-        if "High" in [threshold_result["risk"], ml_risk]:
-            final_risk = "High"
-        elif "Medium" in [threshold_result["risk"]]:
-            final_risk = "Medium"
+
+        final_risk = RiskLevel.LOW
+        if threshold_result["risk"] == RiskLevel.HIGH.value or ml_risk_level == RiskLevel.HIGH:
+            final_risk = RiskLevel.HIGH
+        elif threshold_result["risk"] == RiskLevel.MEDIUM.value or ml_risk_level == RiskLevel.MEDIUM:
+            final_risk = RiskLevel.MEDIUM
         else:
-            final_risk = ml_risk
+            final_risk = RiskLevel.LOW
 
-        return {
-            "risk_level": final_risk,
-            "source": "hybrid-historical",
-            "details": {
-                "threshold_assessment": threshold_result["risk"],
-                "ml_assessment": ml_risk,
-                "threshold_details": threshold_result["details"],
-            },
+        recommendations = {
+            RiskLevel.LOW: "Conditions appear safe. Remain aware of weather changes.",
+            RiskLevel.MEDIUM: "Potential for localized flooding. Exercise caution.",
+            RiskLevel.HIGH: "High flood risk detected. Avoid travel in this area.",
+            RiskLevel.UNKNOWN: "Could not determine risk. Please check conditions manually."
         }
+        
+        contributing_factors = []
+        if "trigger" in threshold_result["details"]:
+            contributing_factors.append(threshold_result["details"]["trigger"])
+        
+        if request.app.state.predictor and ml_risk_level != RiskLevel.UNKNOWN:
+             contributing_factors.append(f"ML assessment: {ml_risk_level.value}")
+        elif ml_features_data["weather_data_found"] and not request.app.state.predictor:
+             contributing_factors.append("Recent weather data available (ML model disabled)")
+        
+        if not contributing_factors:
+            contributing_factors.append("No specific factors identified.")
+
+        return RiskResponse(
+            risk_level=final_risk,
+            source=AssessmentSource.HYBRID_HISTORICAL,
+            details=RiskAssessmentDetails(
+                threshold_assessment=RiskLevel(threshold_result["risk"]),
+                ml_assessment=ml_risk_level,
+                user_reports_found=threshold_result["details"].get("user_reports_found", 0),
+                weather_data_found=ml_features_data["weather_data_found"],
+                contributing_factors=contributing_factors,
+                recommendation=recommendations.get(final_risk, recommendations[RiskLevel.UNKNOWN]),
+                error=threshold_result["details"].get("error")
+            ),
+        )
     except Exception as e:
-        import traceback
-        print("❌ Error in /risk:", str(e))
-        traceback.print_exc()
-        return {
-            "risk_level": "Unknown",
-            "source": "error",
-            "details": {"error": str(e)}
-        }
+        return RiskResponse(
+            risk_level=RiskLevel.UNKNOWN,
+            source=AssessmentSource.ERROR,
+            details=RiskAssessmentDetails(
+                threshold_assessment=RiskLevel.UNKNOWN,
+                ml_assessment=RiskLevel.UNKNOWN,
+                user_reports_found=0,
+                weather_data_found=False,
+                contributing_factors=["An unexpected error occurred"],
+                recommendation="Please try again later.",
+                error=f"Error getting risk assessment: {str(e)}"
+            )
+        )
 
 
-@app.get("/dashboard-data")
-async def get_dashboard_data(request: Request):
-    """Get dashboard data for frontend"""
+@app.get("/dashboard-data", response_model=DashboardResponse)
+async def get_dashboard_data(
+    risk_service: RiskAssessmentService = Depends(get_risk_service),
+    start_time: Optional[datetime] = Query(None, description="Start date/time for filtering reports (ISO format)"),
+    end_time: Optional[datetime] = Query(None, description="End date/time for filtering reports (ISO format)")
+):
+    """Get dashboard data for frontend."""
     try:
-        reports_collection = request.app.state.mongodb.reports
-        recent_reports = await reports_collection.find().sort("created_at", -1).limit(50).to_list(length=50)
+        reports_collection = db.get_collection("reports")
+        
+        query = {}
+        if not start_time and not end_time:
+            start_time = datetime.now(timezone.utc) - timedelta(hours=48)
+            end_time = datetime.now(timezone.utc)
+        elif not end_time:
+            end_time = datetime.now(timezone.utc)
+        elif not start_time:
+             start_time = end_time - timedelta(hours=48)
 
-        map_points = []
-        for report in recent_reports:
-            # Determine risk level based on water level
-            water_level = report.get("water_level", "")
-            if water_level in ["Knee-deep", "Waist-deep", "Chest-deep", "Above head"]:
-                risk_level = "High"
-            elif water_level in ["Ankle-deep"]:
-                risk_level = "Medium"
+
+        if start_time:
+            query["created_at"] = {"$gte": start_time}
+        if end_time:
+            if "created_at" in query:
+                query["created_at"]["$lte"] = end_time
             else:
-                risk_level = "Low"
+                query["created_at"] = {"$lte": end_time}
 
-            map_points.append({
-                "id": str(report["_id"]),
-                "latitude": report["latitude"],
-                "longitude": report["longitude"],
-                "risk_level": risk_level,
-                "source": "user-report",
-                "details": report["description"]
-            })
+        recent_reports_docs = await reports_collection.find(query).sort("created_at", -1).limit(50).to_list(length=50)
 
-        return {"map_points": map_points, "charts_data": {}}
+        map_points: List[MapPoint] = []
+        for report_doc in recent_reports_docs:
+            report_id = str(report_doc.get("_id"))
+            
+            water_level_str = report_doc.get("water_level")
+            report_risk_level = RiskLevel.LOW
+            if water_level_str:
+                try:
+                    water_level_enum = WaterLevel(water_level_str)
+                    if water_level_enum in [WaterLevel.KNEE_DEEP, WaterLevel.WAIST_DEEP, WaterLevel.CHEST_DEEP, WaterLevel.ABOVE_HEAD]:
+                        report_risk_level = RiskLevel.HIGH
+                    elif water_level_enum == WaterLevel.ANKLE_DEEP:
+                        report_risk_level = RiskLevel.MEDIUM
+                except ValueError:
+                    print(f"Warning: Unknown water_level '{water_level_str}' in report {report_id}")
+
+
+            map_points.append(
+                MapPoint(
+                    id=report_id,
+                    latitude=report_doc["latitude"],
+                    longitude=report_doc["longitude"],
+                    risk_level=report_risk_level,
+                    source=AssessmentSource.USER_REPORT,
+                    details=report_doc["description"]
+                )
+            )
+
+        return DashboardResponse(map_points=map_points, charts_data={})
 
     except Exception as e:
-        import traceback
-        print("❌ Error in /dashboard-data:", str(e))
-        traceback.print_exc()
-        return {"map_points": [], "charts_data": {}, "error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve dashboard data: {str(e)}")
 
-
-@app.post("/alerts")
-async def send_alert(request: Request, alert: Alert):
-    """Send a flood alert"""
+@app.post("/alerts", response_model=Alert, status_code=200) 
+async def send_alert(
+    alert_data: Alert,
+    risk_service: RiskAssessmentService = Depends(get_risk_service) 
+):
+    """Send a flood alert and log it."""
     try:
-        timestamp = datetime.now(timezone.utc)
-        print(f"--- 🚨 ALERT TRIGGERED ---")
-        print(f"Time: {timestamp}, Recipient: {alert.recipient}, "
-              f"Location: {alert.location_name}, Risk: {alert.risk_level}")
+        alert_record = alert_data.model_dump()
+        alert_record["sent_at"] = datetime.now(timezone.utc)
+        
+        alerts_collection = db.get_collection("alerts")
+        result = await alerts_collection.insert_one(alert_record)
+        
+        alert_record["_id"] = str(result.inserted_id) 
 
-        # Convert alert to dict and add timestamp
-        alert_record = alert.model_dump()
-        alert_record["sent_at"] = timestamp
-        
-        # Try to insert into MongoDB, but don't fail if it doesn't work
-        try:
-            alerts_collection = request.app.state.mongodb.alerts
-            result = await alerts_collection.insert_one(alert_record)
-            print(f"✅ Alert inserted into MongoDB with ID: {result.inserted_id}")
-            alert_record["_id"] = str(result.inserted_id)
-        except Exception as db_error:
-            print(f"⚠️ MongoDB insertion failed: {db_error}")
-            print("📝 Alert will be logged locally only")
-        
-        return {"status": "Alert logged successfully", "data": alert_record}
-        
+        return Alert(**alert_record)
+
     except Exception as e:
-        import traceback
-        print("❌ Error in /alerts:", str(e))
-        traceback.print_exc()
-        return {"error": str(e)}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+        raise HTTPException(status_code=500, detail=f"Failed to send/log alert: {str(e)}")
