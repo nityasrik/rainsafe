@@ -45,6 +45,18 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("Failed to connect to MongoDB during startup.")
     
     try:
+        # Create required indexes
+        try:
+            reports = db.get_collection("reports")
+            weather = db.get_collection("weather_data")
+            # 2dsphere index for geospatial queries and time index for recency
+            await reports.create_index([("location", "2dsphere")])
+            await reports.create_index([("created_at", -1)])
+            await weather.create_index([("fetched_at", -1)])
+            print("✅ MongoDB indexes ensured.")
+        except Exception as idx_e:
+            print(f"⚠️ Failed to ensure indexes: {idx_e}")
+
         app.state.predictor = FloodPredictor() 
         print("✅ Flood predictor (ML) model loaded successfully.")
     except Exception as e:
@@ -87,6 +99,11 @@ async def create_report(
     try:
         report_data = report.model_dump()
         report_data["created_at"] = datetime.now(timezone.utc)
+        # Add GeoJSON location for geospatial queries
+        report_data["location"] = {
+            "type": "Point",
+            "coordinates": [report.longitude, report.latitude]
+        }
         
         nlp_analysis = await risk_service.analyze_description_with_nlp(report.description)
         report_data["nlp_analysis"] = nlp_analysis

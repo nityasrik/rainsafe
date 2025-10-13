@@ -69,39 +69,58 @@ class RiskAssessmentService:
     async def check_thresholds(self, lat: float, lon: float) -> Dict[str, Any]:
         """
         Check if a location meets risk thresholds based on recent user reports.
-        Returns a dictionary with 'risk' and 'details' including 'user_reports_found'
+        Uses geospatial search when possible with a reasonable radius (~1km),
+        with a fallback to bounding-box search.
         """
         try:
             reports_collection = self.db.get_collection("reports")
-            
+
             # Define a time window for recent reports (e.g., last 24 hours)
             time_window_start = datetime.now(timezone.utc) - timedelta(hours=24)
 
-            # Query for nearby and recent reports
-            nearby_reports = await reports_collection.find({
-                "latitude": {"$gte": lat - 0.01, "$lte": lat + 0.01}, # Adjust radius as needed
-                "longitude": {"$gte": lon - 0.01, "$lte": lon + 0.01},
-                "created_at": {"$gte": time_window_start} 
-            }).to_list(length=50) # Limit the list size for performance
+            # Prefer geospatial $nearSphere if we have a 2dsphere index on 'location'
+            query = {
+                "created_at": {"$gte": time_window_start}
+            }
+
+            nearby_reports: List[dict] = []
+            try:
+                cursor = reports_collection.find({
+                    **query,
+                    "location": {
+                        "$nearSphere": {
+                            "$geometry": {"type": "Point", "coordinates": [lon, lat]},
+                            "$maxDistance": 1000  # ~1km
+                        }
+                    }
+                })
+                nearby_reports = await cursor.limit(50).to_list(length=50)
+            except Exception as geo_err:
+                # Fallback to simple bounding-box if geospatial not available
+                print(f"ℹ️ Geospatial query failed, falling back to bbox: {geo_err}")
+                nearby_reports = await reports_collection.find({
+                    **query,
+                    "latitude": {"$gte": lat - 0.01, "$lte": lat + 0.01},
+                    "longitude": {"$gte": lon - 0.01, "$lte": lon + 0.01},
+                }).limit(50).to_list(length=50)
 
             user_reports_count = len(nearby_reports)
             high_risk_reports = [r for r in nearby_reports if r.get("water_level") in self.thresholds.get("HIGH_WATER_LEVEL", [])]
-            
-            # Prepare details for the risk assessment
+
             details_output = {"user_reports_found": user_reports_count}
             risk_level = "Low"
-            
+
             if high_risk_reports:
                 risk_level = "High"
-                details_output["trigger"] = "High water level reported by users" # Still keep 'trigger' for internal logic
+                details_output["trigger"] = "High water level reported by users"
             elif user_reports_count > 0:
                 risk_level = "Medium"
-                details_output["trigger"] = f"{user_reports_count} recent user reports" # Still keep 'trigger' for internal logic
+                details_output["trigger"] = f"{user_reports_count} recent user reports"
             else:
-                details_output["trigger"] = "No recent user reports" # Still keep 'trigger' for internal logic
-            
+                details_output["trigger"] = "No recent user reports"
+
             return {"risk": risk_level, "details": details_output}
-            
+
         except Exception as e:
             print(f"Error in check_thresholds: {e}")
             return {"risk": "Unknown", "details": {"error": str(e), "user_reports_found": 0}}

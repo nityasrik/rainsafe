@@ -183,7 +183,8 @@ def fetch_and_store_weather():
                     "wind_speed": current_data.get('wind', {}).get('speed', 0)
                 },
                 "forecast_data": forecast_data['list'],  # This is a list of 3-hour forecasts
-                "fetched_at": datetime.now(timezone.utc).isoformat()
+                # Store as datetime, not string, for proper sorting and TTL/indexes
+                "fetched_at": datetime.now(timezone.utc)
             }
             
             # Try to store in MongoDB if connected
