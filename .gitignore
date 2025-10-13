@@ -1,9 +1,50 @@
+# ==============================================================================
+# General
+# ==============================================================================
+
+# ==============================================================================
+# IDE
+# ==============================================================================
+
+# Ignore all IDE-specific files...
+.idea/
+.vscode/*
+
+# ...but DO NOT ignore the dev container configuration inside .vscode
+!.vscode/devcontainer.json
+!.vscode/default.devcontainer.json
+# Or if you have a .devcontainer folder inside .vscode:
+!.vscode/.devcontainer/
+
+# You can also un-ignore other useful shared settings
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ==============================================================================
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==============================================================================
 # Python
+# ==============================================================================
+
+# Byte-compiled / optimized / C files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
-.Python
+
+# Distribution / packaging
 build/
 develop-eggs/
 dist/
@@ -23,60 +64,81 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
+# Virtual Environments
 venv/
 .venv/
 env/
 .env/
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# PyInstaller
+# Usually these files are created by pyinstaller, if you are using it.
+*.manifest
+*.spec
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Mypy cache
+.mypy_cache/
 
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Pytest cache
+.pytest_cache/
+
+# Coverage data
+.coverage
+.coverage.*
+htmlcov/
+
+# ==============================================================================
+# Node.js (for frontend)
+# ==============================================================================
 
 # Logs
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Build output
+dist/
+build/
+.next/
+
+# ==============================================================================
+# Project-specific
+# ==============================================================================
+
+# Environment variables (keep secrets out of version control)
+.env
+.env.*
+!.env.example
+
+# Log files
 logs/
 backend/logs/
+cron.log
+*.log
 
-# Data files
+# Data and ML artifacts (if not meant to be in version control)
 *.csv
 *.json
 weather_data_*.json
-
-# Jupyter Notebook
-.ipynb_checkpoints/
-
-# ML artifacts
 ml_artifacts/
 *.pkl
 *.joblib
 *.model
 
-# Node
-frontend/node_modules/
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
 
-# Cron logs
-cron.log
-
-# Test files
+# Test files (optional, some prefer to keep tests in the repo)
 test_*.py
 *_test.py
