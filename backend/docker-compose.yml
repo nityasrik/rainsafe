@@ -1,75 +1,93 @@
-# backend/docker-compose.yml
+# This file defines all the services needed to run the RainSafe application.
+# It sets up the backend, a local MongoDB database, and an n8n workflow tool.
 
+# The 'services' section defines the different containers that make up your app.
 services:
+  # 1. MongoDB Service (for local development)
+  # This runs a MongoDB database directly on your machine inside a Docker container.
   mongodb:
-    image: mongo:latest
+    image: mongo:6
     container_name: rainsafe-mongodb
     restart: unless-stopped
     volumes:
+      # This line saves the database data to a volume on your machine,
+      # so you don't lose your data when the container stops.
       - mongo_data:/data/db
     ports:
-      - "27017:27017" # Expose for local testing/tools if needed
+      # This exposes the MongoDB port to your local machine, so you can connect
+      # with tools like MongoDB Compass if you need to.
+      - "27017:27017"
+    networks:
+      - rainsafe-network
+    # This healthcheck ensures the backend service waits until the database is ready.
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - rainsafe-network
 
+  # 2. RainSafe Backend Service
+  # This is your main FastAPI application.
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rainsafe-backend
     restart: unless-stopped
+    ports:
+      # This exposes your API on port 8000.
+      - "8000:8000"
+    volumes:
+      # This mounts your local code into the container, so changes you make
+      # are reflected instantly without needing to rebuild.
+      - .:/app
+    # IMPORTANT: This tells the backend to use the local 'mongodb' container.
+    # If you want to use your cloud MongoDB Atlas again, you must:
+    #   1. Comment out the MONGO_URI line below.
+    #   2. Make sure your .env file has the correct Atlas URI.
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/rainsafe_db
     env_file:
       - .env
-    ports:
-      - "8000:8000"
     depends_on:
       mongodb:
-        condition: service_healthy
+        condition: service_healthy # Waits for the database to be ready before starting.
     networks:
       - rainsafe-network
 
-  # --- NEW N8N SERVICE ---
+  # 3. n8n Service (Workflow Automation)
+  # This runs the n8n tool for building automated workflows.
   n8n:
-    image: n8n/n8n # Use the official n8n image
+    image: n8n/n8n
     container_name: rainsafe-n8n
     restart: unless-stopped
     ports:
-      - "5678:5678" # Default n8n UI port
+      # This exposes the n8n user interface on port 5678.
+      - "5678:5678"
     volumes:
-      - n8n_data:/home/node/.n8n # Persist n8n's internal data
+      # Persists n8n's internal data and workflows.
+      - n8n_data:/home/node/.n8n
     environment:
-      # These are important for n8n's internal database and configuration
-      - N8N_HOST=${N8N_HOST:-localhost} # Host n8n is running on, used for self-referencing URLs
+      - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://${N8N_HOST:-localhost}:5678/
-      - N8N_BASIC_AUTH_ACTIVE=true # Enable basic auth for security
+      - WEBHOOK_URL=http://localhost:5678/
+      # Adding basic password protection to the n8n UI for security.
+      - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=n8nuser
-      - N8N_BASIC_AUTH_PASSWORD=n8npassword # CHANGE THIS IN PRODUCTION
-      # Optional: To use MongoDB for n8n's internal database instead of SQLite
-      # - DB_TYPE=mongodb
-      # - DB_MONGO_CONNECTION_URL=mongodb://mongodb:27017/n8n_db # Connect to your MongoDB service
-      #   Note: This makes n8n use MongoDB for its own data. For simple setups, SQLite (default) is fine.
-    # Optional: If n8n needs to access your backend's .env variables (e.g., API keys for external services)
-    # env_file:
-    #   - .env
+      - N8N_BASIC_AUTH_PASSWORD=n8npassword # Change this for a real deployment
+    depends_on:
+      - backend
+      - mongodb
     networks:
       - rainsafe-network
-    depends_on:
-      mongodb: # n8n depends on mongodb if it uses it for its internal DB or workflows
-        condition: service_healthy
-      backend: # n8n depends on backend if it makes API calls to it
-        condition: service_started # or service_healthy if you have a healthcheck
 
+# This section defines the shared network that allows all the containers to talk to each other.
 networks:
   rainsafe-network:
     driver: bridge
 
+# This section defines the named volumes used to persist data.
 volumes:
   mongo_data:
-  n8n_data: # Define volume for n8n's data
+  n8n_data:

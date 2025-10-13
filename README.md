@@ -1,161 +1,131 @@
-# RainSafe
+# RainSafe - Flood Risk Assessment API
 
-Basic structure prepared for backend and frontend.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Structure
+RainSafe is a FastAPI-based backend for a flood risk assessment and real-time weather monitoring system. It provides core functionalities for submitting user reports, assessing flood risk using hybrid analysis (thresholds + ML), fetching real-time weather, and serving data to a frontend dashboard.
 
-```
-backend/   # FastAPI backend (existing app moved here)
-frontend/  # Placeholder for future frontend (devcontainer + Dockerfile)
-```
+## 🌟 Features
 
-## Backend (FastAPI)
+* **🌤️ Weather Data Fetching**: Automated collection of real-time weather and forecast data for key locations (e.g., major Indian cities).
+* **🚨 Flood Risk Assessment**: Hybrid risk prediction combining:
+    * Threshold-based analysis from recent user reports.
+    * ML-powered prediction using current weather and historical data.
+* **📊 Real-time User Reports**: API for users to submit flood conditions with location and severity.
+* **📈 Dashboard Data**: Endpoints designed to feed interactive frontend dashboards with map points and aggregated insights.
+* **🔄 Automated Scheduling**: Cron job for regular weather data updates to ensure fresh data for predictions.
 
-- Change into backend directory and run with your existing commands.
+## 🚀 Getting Started
 
-```
-cd backend
-source ../venv/bin/activate
-python main.py
-```
-
-Swagger UI: http://localhost:8000/docs
-
-## Frontend (Placeholder)
-
-- Open in devcontainer: `.devcontainer/devcontainer.json` provided under `frontend/`.
-- Dockerfile is minimal and keeps the container running for development.
-- Add your framework (Next.js / Vite) later.
-
-# RainSafe Backend
-
-A Flask/FastAPI backend for flood risk assessment and real-time weather monitoring system.
-
-## Features
-
-- 🌤️ **Weather Data Fetching**: Automated weather data collection for major Indian cities
-- 🚨 **Flood Risk Assessment**: ML-powered risk prediction with hybrid analysis
-- 📊 **Real-time Reports**: User-submitted flood reports with location tracking
-- 📈 **Dashboard Data**: API endpoints for frontend dashboard integration
-- 🔄 **Automated Scheduling**: Cron jobs for regular weather data updates
-
-## API Endpoints
-
-### Core Endpoints
-- `GET /` - Health check
-- `POST /report` - Submit flood reports
-- `GET /risk?lat={lat}&lon={lon}` - Get flood risk assessment
-- `GET /dashboard-data` - Get dashboard data for frontend
-- `POST /alerts` - Send flood alerts
-
-### Data Models
-- **Report**: User-submitted flood reports with location and severity
-- **Alert**: Flood alerts with risk levels and notifications
-- **Weather**: Real-time weather data for risk assessment
-
-## Setup Instructions
+These instructions will get your backend up and running for development and testing.
 
 ### Prerequisites
-- Python 3.8+
-- MongoDB Atlas account
-- OpenWeather API key
 
-### Installation
+Before you begin, ensure you have the following:
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd rainsafe-backend
-   ```
+* **Python 3.8+**
+* **Docker & Docker Compose** (for containerized setup)
+* **MongoDB Atlas Account**: You'll need a connection string.
+* **OpenWeather API Key**: For fetching weather data.
+* **(Optional) WSL2 / Ubuntu**: Recommended for consistent development environment on Windows.
 
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or
-   venv\Scripts\activate     # Windows
-   ```
+### 🛠️ Installation & Setup (Docker Compose Recommended)
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+The easiest way to get the entire backend stack (FastAPI + MongoDB) running is with Docker Compose.
 
-4. **Environment Configuration**
-   Create a `.env` file with:
-   ```bash
-   OPENWEATHER_API_KEY=your_openweather_api_key
-   MONGO_URI=your_mongodb_atlas_connection_string
-   ```
+1.  **Clone the repository:**
 
-5. **Run the application**
-   ```bash
-   python main.py
-   ```
+    ```bash
+    git clone [https://github.com/nityasrik/rainsafe.git](https://github.com/nityasrik/rainsafe.git)
+    cd rainsafe
+    ```
 
-## Automated Weather Data Collection
+2.  **Create `.env` file:**
+    Navigate to the `backend/` directory and create a `.env` file with your credentials:
 
-The system automatically fetches weather data every 30 minutes using cron jobs.
+    ```bash
+    cd backend
+    touch .env # Create the .env file
+    ```
 
-### Manual Weather Data Fetch
+    Then, edit `.env` and add:
+
+    ```ini
+    OPENWEATHER_API_KEY=your_openweather_api_key_here
+    MONGO_URI=your_mongodb_atlas_connection_string_here
+    ```
+
+    *Replace placeholders with your actual keys.*
+
+3.  **Build and Run with Docker Compose:**
+    From the `backend/` directory:
+
+    ```bash
+    docker compose up --build -d
+    ```
+
+    *The `-d` flag runs containers in detached mode.*
+
+4.  **Verify Services:**
+    Check container logs to ensure everything started successfully:
+
+    ```bash
+    docker compose logs -f
+    ```
+
+    Look for messages like `RainSafe API is running!`, `MongoDB connected.`, and `Flood predictor (ML) model loaded successfully.`
+
+### 🌐 Accessing the API
+
+Once running, your FastAPI application will be accessible at:
+
+* **API Root:** `http://localhost:8000/`
+* **Interactive API Docs (Swagger UI):** `http://localhost:8000/docs`
+* **Alternative Docs (Redoc):** `http://localhost:8000/redoc`
+
+Use the Swagger UI (`/docs`) to interact with and test all API endpoints directly in your browser.
+
+## 🗺️ API Endpoints
+
+### Core Endpoints
+
+* `GET /`: Health check (returns `{"status": "RainSafe API is running!"}`)
+* `POST /report`: Submit a new flood report.
+* `GET /risk?lat={lat}&lon={lon}`: Get a hybrid flood risk assessment for a given location.
+* `GET /dashboard-data`: Retrieve recent flood reports and risk levels for dashboard visualization.
+* `POST /alerts`: Send and log flood alerts.
+
+### Data Models
+
+* **Report**: User-submitted flood conditions (location, description, water level, NLP analysis).
+* **Alert**: System-generated alerts (location, risk level, recipient, timestamp).
+* **Weather**: Real-time and forecasted weather data.
+
+## 🗃️ MongoDB Collections
+
+The application utilizes the following collections in MongoDB:
+
+* `reports`: Stores user-submitted flood reports.
+* `weather_data`: Stores historical and real-time weather information.
+* `alerts`: Logs all system-generated and dispatched alerts.
+
+## 🤖 ML Model
+
+The system incorporates an ML model (`app/models/flood_predictor.py`) for enhanced flood risk prediction. It leverages:
+
+* Real-time weather data
+* Recent user reports
+* Geographic features (implicitly through location)
+* Historical patterns
+
+**Note**: The `FloodPredictor` is designed to be easily swappable with your trained model. A dummy implementation is provided for initial setup.
+
+## ⚙️ Automated Weather Data Collection
+
+Weather data is automatically fetched and updated in the `weather_data` collection via a cron job.
+
+### Manual Fetch (for testing)
+
+To manually trigger a weather data fetch:
+
 ```bash
-python fetch_weather.py
-```
-
-### Cron Setup
-The system includes automated cron job setup:
-```bash
-*/30 * * * * /path/to/run_weather_cron.sh
-```
-
-## MongoDB Collections
-
-- **reports**: User-submitted flood reports
-- **weather_data**: Historical weather data
-- **alerts**: System-generated alerts
-
-## ML Model
-
-The system uses a trained ML model for flood risk prediction based on:
-- Historical weather patterns
-- User reports
-- Geographic data
-- Real-time conditions
-
-## Development
-
-### Running Tests
-```bash
-python test_api.py
-```
-
-### API Documentation
-Once running, visit `http://localhost:8000/docs` for interactive API documentation.
-
-## Deployment
-
-### Production Considerations
-- Set up proper MongoDB Atlas IP whitelisting
-- Configure environment variables securely
-- Set up monitoring and logging
-- Implement rate limiting
-- Add authentication/authorization
-
-### Docker Support
-```bash
-docker-compose up
-```
-
-## Troubleshooting
-
-See `MONGODB_TROUBLESHOOTING.md` for common MongoDB connection issues.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-
+docker compose exec backend python fetch_weather.py

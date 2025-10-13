@@ -42,7 +42,7 @@ RISK_THRESHOLDS = {
     "WEATHER_THRESHOLDS": {
         "heavy_rain": 10,  # mm/h
         "humidity_high": 80,  # %
-    }
+    },
 }
 
 # Cron Configuration

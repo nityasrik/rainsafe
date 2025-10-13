@@ -12,3 +12,4 @@ requests==2.31.0
 httpx==0.25.2
 spacy==3.7.3
 pydantic[email]
+numpy
