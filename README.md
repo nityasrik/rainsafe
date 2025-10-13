@@ -1,4 +1,4 @@
-# RainSafe Monorepo
+# RainSafe
 
 Basic structure prepared for backend and frontend.
 
