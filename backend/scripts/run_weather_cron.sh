@@ -1,18 +1,31 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Cron script for weather data fetching
-# This script sets up the proper environment for cron execution
+# - Loads environment from .env (if present)
+# - Avoids hardcoded secrets and absolute paths
 
-# Set the working directory
-cd /home/nitya/rainsafe-backend
+set -euo pipefail
 
-# Set environment variables (since cron doesn't load .env files)
-export OPENWEATHER_API_KEY="b75b8b755e6dc7b20952e0fd0fb14c47"
-export MONGO_URI="mongodb+srv://nityasrikanukolanu24_db_user:wT!7wkKmL3XJYGZ@cluster0.y167ax2.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+# Resolve project root (parent of this script directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-# Activate virtual environment and run the script
-source venv/bin/activate
+# Load environment variables from .env if available
+if [ -f .env ]; then
+  # Export all vars defined in .env
+  set -a
+  . ./.env
+  set +a
+fi
+
+# Optionally activate virtualenv if it exists
+if [ -d "venv" ]; then
+  . "venv/bin/activate"
+fi
+
+# Run the weather fetcher
 python3 app/services/weather_service.py
 
 # Log the execution (optional)
-echo "$(date): Weather data fetch completed" >> /home/nitya/rainsafe-backend/cron.log
+echo "$(date): Weather data fetch completed" >> "$PROJECT_ROOT/cron.log"

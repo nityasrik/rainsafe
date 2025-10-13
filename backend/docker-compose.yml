@@ -16,7 +16,7 @@ services:
       - mongo
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     environment:
-      - MONGO_URL=mongodb://mongo:27017/rainsafe_db
+      - MONGO_URI=mongodb://mongo:27017/rainsafe_db
     restart: unless-stopped
 
   mongo:
